@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+
+VERSION='0.1.0.dev0'
+
+ERR_TOO_FEW_ARGS=11
+ERR_TOO_MANY_ARGS=12
+
+
+function is_set {
+    [[ -n ${!1+x} ]]
+}
+
+
+function usage {
+    echo "usage: rsbu [--print-rsync-command | --pretty-print-rsync-command] [EXTRA RSYNC OPTIONS ...] [--] SRC DEST"
+    exit "${1:-0}"
+}
+
+
+action=run  # run (default) | print | pretty-print
+
+
+declare src
+declare dest
+declare -a extra_options
+
+while [[ ${#} -gt 0 ]]; do
+    arg=${1}
+    shift
+    case ${arg} in
+        --)
+            break
+            ;;
+        --help|-h)
+            usage
+            ;;
+        --version)
+            echo "rsbu ${VERSION}"
+            exit
+            ;;
+        --print-rsync-command)
+            action='print'
+            ;;
+        --pretty-print-rsync-command)
+            action='pretty-print'
+            ;;
+        -*)
+            extra_options+=("${arg}")
+            ;;
+        *)
+            if ! is_set src; then
+                src=${arg}
+            elif ! is_set dest; then
+                dest=${arg}
+            else
+                usage ${ERR_TOO_MANY_ARGS}
+            fi
+            ;;
+    esac
+done
+
+if ! is_set src; then
+    [[ ${#} -gt 0 ]] || usage ${ERR_TOO_FEW_ARGS}
+    src=${1}
+    shift
+fi
+
+if ! is_set dest; then
+    [[ ${#} -gt 0 ]] || usage ${ERR_TOO_FEW_ARGS}
+    dest=${1}
+    shift
+fi
+
+[[ ${#} -eq 0 ]] || usage ${ERR_TOO_MANY_ARGS}
+
+if [[ ${src:0-1} != '/' ]]; then
+    src="${src}/"
+fi
+
+
+if is_set RSBU_OPTIONS; then
+    declare -a options="(${RSBU_OPTIONS})"
+else
+    options=(
+        --delete
+        --archive
+        --hard-links
+        --human-readable
+        --progress
+    )
+fi
+
+if is_set RSBU_FILTERS; then
+    declare -a filters="(${RSBU_FILTERS})"
+else
+    filters=(
+        --filter='+ .rsync-exclude'
+        --filter='+ .rsync-filter'
+        --filter='dir-merge,- .rsync-exclude'
+        --filter='dir-merge .rsync-filter'
+    )
+fi
+
+rsync=${RSBU_RSYNC:-'rsync'}
+args=("${options[@]}" "${extra_options[@]}" "${filters[@]}" -- "${src}" "${dest}")
+
+
+case ${action} in
+    run)
+        exec "${rsync}" "${args[@]}"
+        ;;
+    print)
+        printf '%q' "${rsync}"
+        printf ' %q' "${args[@]}"
+        printf '\n'
+        ;;
+    pretty-print)
+        printf '%q' "${rsync}"
+        printf ' \\\n    %q' "${args[@]}"
+        printf '\n'
+        ;;
+esac
